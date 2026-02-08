@@ -4,7 +4,6 @@ pipeline_config:
   output_path: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/chrom2vec_output
   module_path: /broad/boxialab/sihengtao/chromnitron/chrom2vec/src/Chrom2VecModules
   resources_path: /broad/boxialab/sihengtao/chromnitron/resources
-  skip_s9: true
 
 singularity_config:
   use_singularity: 'True'
@@ -19,32 +18,53 @@ resource_config:
   chr_size: chr_sizes
 
 batch_config:
+  # ---------- Paths ----------
   srr_list_path: ./srr_list.txt
   sra_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/sra
   fastq_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/fastq
   temp_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/tmp
+
+  # ---------- Parallelism ----------
   parallel_workers: 3
   fasterq_threads: 16
+  run_s9: false
+
+  # ---------- Download Commands ----------
+  prefetch_cmd: prefetch
+  prefetch_output_arg: --output-directory
+  prefetch_args: []
+  fasterq_dump_cmd: fasterq-dump
+  fasterq_dump_args: []
+  fasterq_use_gzip: false
+
+  # ---------- Download with Singularity (optional) ----------
   download_use_singularity: true
   download_singularity_cmd: singularity
   download_singularity_image: docker://ncbi/sra-tools:latest
   download_singularity_bind: /broad/boxialab/sihengtao:/broad/boxialab/sihengtao
   download_singularity_args: []
-  prefetch_cmd: prefetch
-  prefetch_output_arg: --output-directory
-  fasterq_dump_cmd: fasterq-dump
-  prefetch_args: []
-  fasterq_dump_args: []
-  fasterq_use_gzip: false
+
+  # ---------- FASTQ Compression ----------
   compress_cmd: pigz
-  compress_args:
-    - -p
-    - "8"
-    - -1
-    - -f
-  skip_s9: false
-  cleanup_after_s8: false
-  delete_fastq: false
-  delete_sra: false
-  keep_dirs:
-    - s8_normalized
+  compress_args: [-p, "8", -1, -f]
+
+  # ---------- Cleanup ----------
+  # Cleanup is only applied when cleanup.after_s8 is true.
+  cleanup:
+    after_s8: false
+    delete_fastq: false
+    delete_sra: false
+    copy_qc_to_s8: false
+    qc_subdir: qc
+
+    # Stage deletion toggles (true = delete this stage directory)
+    delete_stage:
+      s1: false  # s1_FASTQ
+      s2: false  # s2_fastp
+      s3: false  # s3_hisat2
+      s4: false  # s4_merged_bam
+      s5: false  # s5_subsampled_bam
+      s6: false  # s6_genrich
+      s7: false  # s7_zarr
+      s8: false  # s8_normalized
+      s9: false  # s9_bigwig

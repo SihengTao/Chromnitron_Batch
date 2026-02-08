@@ -6,7 +6,7 @@ import subprocess
 import time
 import yaml
 
-INTERMEDIATE_DIRS = [
+STAGE_DIRS = [
     "s1_FASTQ",
     "s2_fastp",
     "s3_hisat2",
@@ -14,7 +14,20 @@ INTERMEDIATE_DIRS = [
     "s5_subsampled_bam",
     "s6_genrich",
     "s7_zarr",
+    "s8_normalized",
     "s9_bigwig",
+]
+
+DELETE_STAGE_FLAGS = [
+    ("delete_s1", "s1_FASTQ"),
+    ("delete_s2", "s2_fastp"),
+    ("delete_s3", "s3_hisat2"),
+    ("delete_s4", "s4_merged_bam"),
+    ("delete_s5", "s5_subsampled_bam"),
+    ("delete_s6", "s6_genrich"),
+    ("delete_s7", "s7_zarr"),
+    ("delete_s8", "s8_normalized"),
+    ("delete_s9", "s9_bigwig"),
 ]
 
 def parse_args(argv=None):
@@ -41,12 +54,36 @@ def resolve_pipeline_options(config, skip_s9=None, cleanup_after_s8=None,
     pipeline_cfg = config.get("pipeline_config", {})
     cleanup_cfg = config.get("cleanup_config", {})
 
+    keep_dirs = cleanup_cfg.get("keep_dirs")
+    if keep_dirs is None:
+        keep_dirs = ["s8_normalized"]
+
+    use_flag_mode = any(flag in cleanup_cfg for flag, _ in DELETE_STAGE_FLAGS)
+    if use_flag_mode:
+        delete_dirs = [
+            stage for flag, stage in DELETE_STAGE_FLAGS
+            if as_bool(cleanup_cfg.get(flag), False)
+        ]
+        keep_dirs = [d for d in STAGE_DIRS if d not in set(delete_dirs)]
+    else:
+        delete_dirs = cleanup_cfg.get("delete_dirs")
+        if delete_dirs is not None:
+            delete_set = set(delete_dirs)
+            delete_dirs = [d for d in STAGE_DIRS if d in delete_set]
+            keep_dirs = [d for d in STAGE_DIRS if d not in delete_set]
+        else:
+            keep = set(keep_dirs)
+            delete_dirs = [d for d in STAGE_DIRS if d not in keep]
+
     resolved = {
         "skip_s9": as_bool(pipeline_cfg.get("skip_s9", False)),
         "cleanup_after_s8": as_bool(cleanup_cfg.get("after_s8", False)),
         "delete_fastq": as_bool(cleanup_cfg.get("delete_fastq", False)),
         "delete_sra": as_bool(cleanup_cfg.get("delete_sra", False)),
-        "keep_dirs": cleanup_cfg.get("keep_dirs") or ["s8_normalized"],
+        "keep_dirs": keep_dirs,
+        "delete_dirs": delete_dirs,
+        "copy_qc_to_s8": as_bool(cleanup_cfg.get("copy_qc_to_s8", False)),
+        "qc_subdir": cleanup_cfg.get("qc_subdir") or "qc",
         "fastq_root": cleanup_cfg.get("fastq_root"),
         "sra_root": cleanup_cfg.get("sra_root"),
         "sra_files": cleanup_cfg.get("sra_files") or [],
@@ -89,13 +126,48 @@ def delete_paths(paths, allowed_root=None, label="file"):
 
 def cleanup_intermediate_outputs(save_path, keep_dirs=None):
     keep = set(keep_dirs or [])
-    for dir_name in INTERMEDIATE_DIRS:
-        if dir_name in keep:
+    for dir_name in STAGE_DIRS:
+        if keep and dir_name in keep:
             continue
         target = os.path.join(save_path, dir_name)
         if os.path.exists(target):
             shutil.rmtree(target)
             print(f"Removed intermediate output: {target}")
+
+def copy_qc_outputs_to_s8(save_path, qc_subdir="qc"):
+    qc_root = os.path.join(save_path, "s8_normalized", qc_subdir)
+    copied = 0
+
+    fastp_root = os.path.join(save_path, "s2_fastp")
+    if os.path.isdir(fastp_root):
+        for rep in os.listdir(fastp_root):
+            src_dir = os.path.join(fastp_root, rep)
+            if not os.path.isdir(src_dir):
+                continue
+            dst_dir = os.path.join(qc_root, "s2_fastp", rep)
+            os.makedirs(dst_dir, exist_ok=True)
+            for name in ("fastp.json", "fastp.html"):
+                src = os.path.join(src_dir, name)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(dst_dir, name))
+                    copied += 1
+
+    hisat2_root = os.path.join(save_path, "s3_hisat2")
+    if os.path.isdir(hisat2_root):
+        for rep in os.listdir(hisat2_root):
+            src_dir = os.path.join(hisat2_root, rep)
+            if not os.path.isdir(src_dir):
+                continue
+            src = os.path.join(src_dir, "summary.txt")
+            if not os.path.isfile(src):
+                continue
+            dst_dir = os.path.join(qc_root, "s3_hisat2", rep)
+            os.makedirs(dst_dir, exist_ok=True)
+            shutil.copy2(src, os.path.join(dst_dir, "summary.txt"))
+            copied += 1
+
+    if copied:
+        print(f"Copied {copied} QC files to {qc_root}")
 
 def main():
     args = parse_args()
@@ -153,7 +225,11 @@ def run_pipeline(config, skip_s9=None, cleanup_after_s8=None,
         if not os.path.exists(expected_s8):
             raise RuntimeError(f"s8 output not found; skipping cleanup: {expected_s8}")
 
-        cleanup_intermediate_outputs(save_path, options["keep_dirs"])
+        if options["copy_qc_to_s8"]:
+            copy_qc_outputs_to_s8(save_path, options["qc_subdir"])
+
+        keep_dirs = [d for d in STAGE_DIRS if d not in set(options["delete_dirs"])]
+        cleanup_intermediate_outputs(save_path, keep_dirs=keep_dirs)
 
         if options["delete_fastq"]:
             fastq_paths = list(iter_fastq_paths(fastq_files))

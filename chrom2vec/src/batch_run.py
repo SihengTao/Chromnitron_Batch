@@ -13,6 +13,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from main import run_pipeline, as_bool
 
+DELETE_STAGE_FLAGS = [
+    ("s1", "delete_s1"),
+    ("s2", "delete_s2"),
+    ("s3", "delete_s3"),
+    ("s4", "delete_s4"),
+    ("s5", "delete_s5"),
+    ("s6", "delete_s6"),
+    ("s7", "delete_s7"),
+    ("s8", "delete_s8"),
+    ("s9", "delete_s9"),
+]
+
+DELETE_STAGE_FLAG_KEYS = [flag for _, flag in DELETE_STAGE_FLAGS]
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Batch-run chrom2vec on SRR list.")
     parser.add_argument("config", help="Path to batch config YAML.")
@@ -21,6 +35,39 @@ def parse_args(argv=None):
 def load_config(config_path):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
+
+def get_cleanup_section(batch_cfg):
+    cleanup = batch_cfg.get("cleanup")
+    if isinstance(cleanup, dict):
+        return cleanup
+    return {}
+
+def get_cleanup_value(batch_cfg, key, default=None):
+    cleanup = get_cleanup_section(batch_cfg)
+    if key in cleanup:
+        return cleanup[key]
+    if key == "after_s8" and "cleanup_after_s8" in batch_cfg:
+        return batch_cfg["cleanup_after_s8"]
+    if key in batch_cfg:
+        return batch_cfg[key]
+    return default
+
+def get_stage_delete_value(batch_cfg, stage_short):
+    cleanup = get_cleanup_section(batch_cfg)
+    delete_stage = cleanup.get("delete_stage")
+    if isinstance(delete_stage, dict) and stage_short in delete_stage:
+        return delete_stage[stage_short]
+    flat_key = f"delete_{stage_short}"
+    if flat_key in batch_cfg:
+        return batch_cfg[flat_key]
+    return None
+
+def should_use_stage_delete_flags(batch_cfg):
+    cleanup = get_cleanup_section(batch_cfg)
+    delete_stage = cleanup.get("delete_stage")
+    if isinstance(delete_stage, dict):
+        return True
+    return any(key in batch_cfg for key in DELETE_STAGE_FLAG_KEYS)
 
 def resolve_path(base_dir, path):
     if path is None:
@@ -222,16 +269,48 @@ def build_sample_config(base_config, srr, r1, r2, batch_cfg, sra_root, fastq_roo
         "rep1": {"R1": r1, "R2": r2}
     }
 
+    run_s9 = batch_cfg.get("run_s9")
+    if run_s9 is not None:
+        sample_config["pipeline_config"]["skip_s9"] = not as_bool(run_s9, False)
+
     cleanup_cfg = sample_config.setdefault("cleanup_config", {})
-    cleanup_cfg["after_s8"] = as_bool(batch_cfg.get("cleanup_after_s8", True))
-    cleanup_cfg["keep_dirs"] = batch_cfg.get("keep_dirs") or ["s8_normalized"]
-    cleanup_cfg["delete_fastq"] = as_bool(batch_cfg.get("delete_fastq", True))
-    cleanup_cfg["delete_sra"] = as_bool(batch_cfg.get("delete_sra", True))
+    cleanup_cfg["after_s8"] = as_bool(
+        get_cleanup_value(batch_cfg, "after_s8", True)
+    )
+
+    use_flag_mode = should_use_stage_delete_flags(batch_cfg)
+    if use_flag_mode:
+        for stage_short, flag_key in DELETE_STAGE_FLAGS:
+            value = get_stage_delete_value(batch_cfg, stage_short)
+            cleanup_cfg[flag_key] = as_bool(value, False)
+        cleanup_cfg.pop("keep_dirs", None)
+        cleanup_cfg.pop("delete_dirs", None)
+    else:
+        delete_dirs = get_cleanup_value(batch_cfg, "delete_dirs")
+        if delete_dirs is not None:
+            cleanup_cfg["delete_dirs"] = delete_dirs
+            cleanup_cfg.pop("keep_dirs", None)
+        else:
+            cleanup_cfg.pop("delete_dirs", None)
+            cleanup_cfg["keep_dirs"] = (
+                get_cleanup_value(batch_cfg, "keep_dirs") or ["s8_normalized"]
+            )
+
+    cleanup_cfg["delete_fastq"] = as_bool(
+        get_cleanup_value(batch_cfg, "delete_fastq", True)
+    )
+    cleanup_cfg["delete_sra"] = as_bool(
+        get_cleanup_value(batch_cfg, "delete_sra", True)
+    )
+    cleanup_cfg["copy_qc_to_s8"] = as_bool(
+        get_cleanup_value(batch_cfg, "copy_qc_to_s8", False)
+    )
+    qc_subdir = get_cleanup_value(batch_cfg, "qc_subdir")
+    if qc_subdir:
+        cleanup_cfg["qc_subdir"] = str(qc_subdir)
     cleanup_cfg["fastq_root"] = fastq_root
     cleanup_cfg["sra_root"] = sra_root
     cleanup_cfg["sra_files"] = [sra_path]
-
-    sample_config["pipeline_config"]["skip_s9"] = as_bool(batch_cfg.get("skip_s9", True))
     return sample_config
 
 def process_sample(srr, base_config, batch_cfg, config_dir):
@@ -293,13 +372,7 @@ def process_sample(srr, base_config, batch_cfg, config_dir):
         sra_path=sra_path,
     )
 
-    run_pipeline(
-        sample_config,
-        skip_s9=as_bool(batch_cfg.get("skip_s9", True)),
-        cleanup_after_s8=as_bool(batch_cfg.get("cleanup_after_s8", True)),
-        delete_fastq=as_bool(batch_cfg.get("delete_fastq", True)),
-        delete_sra=as_bool(batch_cfg.get("delete_sra", True)),
-    )
+    run_pipeline(sample_config)
 
     return srr
 
