@@ -13,6 +13,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from main import run_pipeline, as_bool
 
+DEFAULT_EBI_FTP_ROOT = "ftp://ftp.sra.ebi.ac.uk/vol1/fastq"
+DEFAULT_EBI_DOWNLOAD_CMD = ["wget"]
+DEFAULT_EBI_DOWNLOAD_ARGS = ["-nc"]
+DEFAULT_EBI_PROBE_CMD = ["wget"]
+DEFAULT_EBI_PROBE_ARGS = ["--spider", "-q"]
+DEFAULT_EBI_RETRY_COUNT = 2
+DEFAULT_EBI_RETRY_WAIT_SEC = 30
+
 DELETE_STAGE_FLAGS = [
     ("s1", "delete_s1"),
     ("s2", "delete_s2"),
@@ -212,12 +220,109 @@ def run_fasterq_dump(srr, sra_path, output_dir, tmp_root, fasterq_cmd, fasterq_a
     run_command(cmd, f"fasterq-dump {srr} (no gzip)")
     return False
 
+def expected_fastq_paths(fastq_root, srr):
+    out_dir = os.path.join(fastq_root, srr)
+    r1 = os.path.join(out_dir, f"{srr}_1.fastq.gz")
+    r2 = os.path.join(out_dir, f"{srr}_2.fastq.gz")
+    return out_dir, r1, r2
+
+def ebi_base_url(srr, ebi_ftp_root=DEFAULT_EBI_FTP_ROOT):
+    if not str(srr).startswith("SRR"):
+        return None
+    num = str(srr)[3:]
+    if not num.isdigit():
+        return None
+
+    prefix = num[:3]
+    if len(num) <= 6:
+        suffix = num[3:6]
+    else:
+        suffix = num[6:]
+    if not suffix:
+        return None
+
+    try:
+        suffix = f"{int(suffix):03d}"
+    except ValueError:
+        return None
+
+    root = str(ebi_ftp_root).rstrip("/")
+    return f"{root}/SRR{prefix}/{suffix}/{srr}"
+
+def ebi_fastq_urls(srr, ebi_ftp_root=DEFAULT_EBI_FTP_ROOT):
+    base_url = ebi_base_url(srr, ebi_ftp_root=ebi_ftp_root)
+    if not base_url:
+        return None, None
+    return (
+        f"{base_url}/{srr}_1.fastq.gz",
+        f"{base_url}/{srr}_2.fastq.gz",
+    )
+
+def probe_remote_file(url, probe_cmd=None, probe_args=None):
+    probe_cmd = probe_cmd or DEFAULT_EBI_PROBE_CMD
+    probe_args = probe_args or DEFAULT_EBI_PROBE_ARGS
+    cmd = probe_cmd + probe_args + [url]
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    return result.returncode == 0
+
+def try_download_from_ebi(srr, fastq_root):
+    out_dir, r1, r2 = expected_fastq_paths(fastq_root, srr)
+    if os.path.exists(r1) and os.path.exists(r2):
+        return True
+
+    r1_url, r2_url = ebi_fastq_urls(srr)
+    if not (r1_url and r2_url):
+        print(f"Skipping EBI check for invalid SRR format: {srr}")
+        return False
+
+    print(f"Checking EBI FASTQ availability for {srr}")
+    if not (probe_remote_file(r1_url) and probe_remote_file(r2_url)):
+        print(f"EBI FASTQ not found for {srr}, will retry or fallback.")
+        return False
+
+    os.makedirs(out_dir, exist_ok=True)
+    for url in (r1_url, r2_url):
+        cmd = DEFAULT_EBI_DOWNLOAD_CMD + DEFAULT_EBI_DOWNLOAD_ARGS + ["-P", out_dir, url]
+        run_command(cmd, f"ebi download {srr}")
+
+    return os.path.exists(r1) and os.path.exists(r2)
+
 def download_srr(srr, sra_root, fastq_root, tmp_root,
                  prefetch_cmd, prefetch_args, prefetch_output_arg,
                  fasterq_cmd, fasterq_args, threads, gzip_enabled,
                  compress_cmd, compress_args):
     os.makedirs(sra_root, exist_ok=True)
     os.makedirs(fastq_root, exist_ok=True)
+
+    out_dir, r1, r2 = expected_fastq_paths(fastq_root, srr)
+    if os.path.exists(r1) and os.path.exists(r2):
+        return r1, r2, None
+
+    for attempt in range(DEFAULT_EBI_RETRY_COUNT + 1):
+        try:
+            if try_download_from_ebi(
+                srr=srr,
+                fastq_root=fastq_root,
+            ):
+                print(f"Using EBI FASTQ for {srr}")
+                return r1, r2, None
+        except Exception as exc:
+            print(f"EBI attempt {attempt + 1} failed for {srr}: {exc}")
+
+        if attempt < DEFAULT_EBI_RETRY_COUNT:
+            print(
+                f"Retrying EBI for {srr} in {DEFAULT_EBI_RETRY_WAIT_SEC}s "
+                f"({attempt + 1}/{DEFAULT_EBI_RETRY_COUNT})"
+            )
+            time.sleep(DEFAULT_EBI_RETRY_WAIT_SEC)
+        else:
+            print(f"EBI failed after retries for {srr}, fallback to NCBI.")
+
+    # Avoid partially downloaded pairs interfering with NCBI fallback.
+    if os.path.exists(r1) != os.path.exists(r2):
+        for path in (r1, r2):
+            if os.path.exists(path):
+                os.remove(path)
 
     sra_path = None
     try:
@@ -235,14 +340,12 @@ def download_srr(srr, sra_root, fastq_root, tmp_root,
         )
         sra_path = find_sra_file(sra_root, srr)
 
-    r1 = os.path.join(fastq_root, srr, f"{srr}_1.fastq.gz")
-    r2 = os.path.join(fastq_root, srr, f"{srr}_2.fastq.gz")
     if not (os.path.exists(r1) and os.path.exists(r2)):
-        os.makedirs(os.path.dirname(r1), exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
         used_gzip = run_fasterq_dump(
             srr=srr,
             sra_path=sra_path,
-            output_dir=os.path.dirname(r1),
+            output_dir=out_dir,
             tmp_root=tmp_root,
             fasterq_cmd=fasterq_cmd,
             fasterq_args=fasterq_args,
@@ -310,19 +413,60 @@ def build_sample_config(base_config, srr, r1, r2, batch_cfg, sra_root, fastq_roo
         cleanup_cfg["qc_subdir"] = str(qc_subdir)
     cleanup_cfg["fastq_root"] = fastq_root
     cleanup_cfg["sra_root"] = sra_root
-    cleanup_cfg["sra_files"] = [sra_path]
+    cleanup_cfg["sra_files"] = [sra_path] if sra_path else []
     return sample_config
 
-def process_sample(srr, base_config, batch_cfg, config_dir):
-    output_root = base_config.get("pipeline_config", {}).get("output_path")
-    if output_root:
-        expected = os.path.join(
+def should_run_s9(base_config, batch_cfg):
+    run_s9 = batch_cfg.get("run_s9")
+    if run_s9 is not None:
+        return as_bool(run_s9, False)
+    skip_s9 = base_config.get("pipeline_config", {}).get("skip_s9")
+    return not as_bool(skip_s9, False)
+
+def should_keep_stage_after_cleanup(batch_cfg, stage_short, stage_dir):
+    use_flag_mode = should_use_stage_delete_flags(batch_cfg)
+    if use_flag_mode:
+        return not as_bool(get_stage_delete_value(batch_cfg, stage_short), False)
+
+    delete_dirs = get_cleanup_value(batch_cfg, "delete_dirs")
+    if delete_dirs is not None:
+        return stage_dir not in set(delete_dirs)
+
+    keep_dirs = get_cleanup_value(batch_cfg, "keep_dirs") or ["s8_normalized"]
+    return stage_dir in set(keep_dirs)
+
+def get_completion_marker_path(output_root, srr, base_config, batch_cfg):
+    run_s9 = should_run_s9(base_config, batch_cfg)
+    cleanup_after_s8 = as_bool(get_cleanup_value(batch_cfg, "after_s8", True))
+
+    keep_s8 = True
+    keep_s9 = run_s9
+    if cleanup_after_s8:
+        keep_s8 = should_keep_stage_after_cleanup(batch_cfg, "s8", "s8_normalized")
+        if run_s9:
+            keep_s9 = should_keep_stage_after_cleanup(batch_cfg, "s9", "s9_bigwig")
+
+    if run_s9 and keep_s9:
+        return os.path.join(
+            output_root,
+            srr,
+            "s9_bigwig",
+            "genrich_normalized.bw",
+        )
+    if keep_s8:
+        return os.path.join(
             output_root,
             srr,
             "s8_normalized",
             "genrich_normalized.zarr",
         )
-        if os.path.exists(expected):
+    return None
+
+def process_sample(srr, base_config, batch_cfg, config_dir):
+    output_root = base_config.get("pipeline_config", {}).get("output_path")
+    if output_root:
+        expected = get_completion_marker_path(output_root, srr, base_config, batch_cfg)
+        if expected and os.path.exists(expected):
             print(f"Skipping {srr}: existing output found at {expected}")
             return srr
 

@@ -2,22 +2,22 @@ pipeline_config:
   run_name: 'auto'
   fastq_files:
     rep1:
-        R1: /broad/boxialab/sihengtao/projects/30-vs70+atac_clock_pilot/fastq/SRR17466787_1.fastq.gz
-        R2: /broad/boxialab/sihengtao/projects/30-vs70+atac_clock_pilot/fastq/SRR17466787_2.fastq.gz
+        R1: /broad/boxialab/your_name/projects/CD8_senescence/fastq/SRR17466787_1.fastq.gz
+        R2: /broad/boxialab/your_name/projects/CD8_senescence/fastq/SRR17466787_2.fastq.gz
     # rep2:
-    #     R1: /broad/boxialab/sihengtao/chromnitron/resources/chrom2vec_fastq/rep2_R1.fastq.gz
-    #     R2: /broad/boxialab/sihengtao/chromnitron/resources/chrom2vec_fastq/rep2_R2.fastq.gz
+    #     R1: /broad/boxialab/your_name/chromnitron/resources/chrom2vec_fastq/rep2_R1.fastq.gz
+    #     R2: /broad/boxialab/your_name/chromnitron/resources/chrom2vec_fastq/rep2_R2.fastq.gz
 
-  output_path: /broad/boxialab/sihengtao/projects/30-vs70+atac_clock_pilot/chrom2vec_output
-  module_path: /broad/boxialab/sihengtao/chromnitron/chrom2vec/src/Chrom2VecModules
-  resources_path: /broad/boxialab/sihengtao/chromnitron/resources
+  output_path: /broad/boxialab/your_name/projects/CD8_senescence/chrom2vec_output
+  module_path: /broad/boxialab/your_name/chromnitron/chrom2vec/src/Chrom2VecModules
+  resources_path: /broad/boxialab/your_name/chromnitron/resources
 
 singularity_config:
   use_singularity: 'True'
-  bind_path: /broad/boxialab/sihengtao:/broad/boxialab/sihengtao
+  bind_path: /broad/boxialab/your_name:/broad/boxialab/your_name
 
 resource_config:
-  root: /broad/boxialab/sihengtao/chromnitron/resources
+  root: /broad/boxialab/your_name/chromnitron/resources
   hisat2_index: alignment_index/hisat2
   assembly_name: hg38
   blacklist: blacklist/hg38-blacklist.v2.bed

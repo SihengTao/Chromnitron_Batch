@@ -1,13 +1,13 @@
 pipeline_config:
   run_name: auto
   fastq_files: {}
-  output_path: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/chrom2vec_output
-  module_path: /broad/boxialab/sihengtao/chromnitron/chrom2vec/src/Chrom2VecModules
-  resources_path: /broad/boxialab/sihengtao/chromnitron/resources
+  output_path: /broad/boxialab/your_name/projects/CD8_senescence/chrom2vec_output
+  module_path: /broad/boxialab/your_name/chromnitron/chrom2vec/src/Chrom2VecModules
+  resources_path: /broad/boxialab/your_name/chromnitron/resources
 
 singularity_config:
   use_singularity: 'True'
-  bind_path: /broad/boxialab/sihengtao:/broad/boxialab/sihengtao
+  bind_path: /broad/boxialab/your_name:/broad/boxialab/your_name
 
 resource_config:
   hisat2_index: alignment_index/hisat2
@@ -20,14 +20,14 @@ resource_config:
 batch_config:
   # ---------- Paths ----------
   srr_list_path: ./srr_list.txt
-  sra_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/sra
-  fastq_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/fastq
-  temp_root: /broad/boxialab/sihengtao/projects/CD4_young_vs_old/tmp
+  sra_root: /broad/boxialab/your_name/projects/CD8_senescence/sra
+  fastq_root: /broad/boxialab/your_name/projects/CD8_senescence/fastq
+  temp_root: /broad/boxialab/your_name/projects/CD8_senescence/tmp
 
   # ---------- Parallelism ----------
   parallel_workers: 3
   fasterq_threads: 16
-  run_s9: false
+  run_s9: True
 
   # ---------- Download Commands ----------
   prefetch_cmd: prefetch
@@ -41,7 +41,7 @@ batch_config:
   download_use_singularity: true
   download_singularity_cmd: singularity
   download_singularity_image: docker://ncbi/sra-tools:latest
-  download_singularity_bind: /broad/boxialab/sihengtao:/broad/boxialab/sihengtao
+  download_singularity_bind: /broad/boxialab/your_name:/broad/boxialab/your_name
   download_singularity_args: []
 
   # ---------- FASTQ Compression ----------
@@ -51,20 +51,20 @@ batch_config:
   # ---------- Cleanup ----------
   # Cleanup is only applied when cleanup.after_s8 is true.
   cleanup:
-    after_s8: false
-    delete_fastq: false
-    delete_sra: false
-    copy_qc_to_s8: false
+    after_s8: false  # Set to true to enable cleanup after s8_normalized 
+    delete_fastq: true
+    delete_sra: true
+    copy_qc_to_s8: true
     qc_subdir: qc
 
     # Stage deletion toggles (true = delete this stage directory)
     delete_stage:
       s1: false  # s1_FASTQ
-      s2: false  # s2_fastp
-      s3: false  # s3_hisat2
-      s4: false  # s4_merged_bam
-      s5: false  # s5_subsampled_bam
-      s6: false  # s6_genrich
-      s7: false  # s7_zarr
+      s2: false  # s2_fastp & qc
+      s3: true  # s3_hisat2
+      s4: true  # s4_merged_bam
+      s5: true  # s5_subsampled_bam
+      s6: true  # s6_genrich
+      s7: true  # s7_zarr
       s8: false  # s8_normalized
       s9: false  # s9_bigwig

@@ -30,7 +30,7 @@ python main.py config.yaml
 ```
 python chrom2vec/src/batch_run.py chrom2vec/src/batch_config.yaml
 ```
-This will download each SRR with `prefetch` + `fasterq-dump`, run chrom2vec, skip s9, keep only s8 outputs, and delete raw FASTQ/SRA if enabled in `batch_config`. To avoid conflicts with an older system `prefetch`, set `batch_config.download_use_singularity: true` and provide `download_singularity_image` (local `.sif` or `docker://` URI).
+This will first check EBI for ready-made FASTQ files for each SRR and download them directly when available; if EBI FASTQ is unavailable, it falls back to `prefetch` + `fasterq-dump`. Then it runs chrom2vec, skips s9, keeps only s8 outputs, and deletes raw FASTQ/SRA if enabled in `batch_config`. To avoid conflicts with an older system `prefetch`, set `batch_config.download_use_singularity: true` and provide `download_singularity_image` (local `.sif` or `docker://` URI).
 
 ## Notes: additional data downloads on the first run
 The pipeline will automatically download a few files on the first run. In case some links are broken, here is a list of all files that you can manually check and download:

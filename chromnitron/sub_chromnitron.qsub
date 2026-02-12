@@ -5,7 +5,7 @@
 #$ -l h_vmem=16G
 #$ -l h_rt=24:00:00
 #$ -m ea
-#$ -M stao@broadinstitute.org
+#$ -M your_name@broadinstitute.org
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ cd "$SCRIPT_DIR"
 
 # conda env (Broad)
 source /broad/software/free/Linux/redhat_7_x86_64/pkgs/anaconda3_2022.10/etc/profile.d/conda.sh
-conda activate /home/unix/stao/env_all/chromnitron
+conda activate /home/unix/your_name/env_all/chromnitron
 
 
 python inference.py examples/local_config.yaml

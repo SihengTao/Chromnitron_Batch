@@ -1,21 +1,17 @@
 #!/bin/bash
-#$ -N chrom2vec
+#$ -N chromnitron_gpu
 #$ -cwd
-#$ -j y
-#$ -o logs/chrom2vec.$JOB_ID.log
-#$ -pe smp 16
 #$ -l h_vmem=16G
-#$ -l h_rt=24:00:00
+#$ -l h_rt=10:00:00
+#$ -l gpu=1
+#$ -l os=RedHat8
+#$ -hard
 #$ -m ea
 #$ -M your_name@broadinstitute.org
 
-set -euo pipefail
-mkdir -p logs
-
 # conda env
 source /broad/software/free/Linux/redhat_7_x86_64/pkgs/anaconda3_2022.10/etc/profile.d/conda.sh
-conda activate /home/unix/your_name/env_all/chromnitron
+conda activate /broad/boxialab/your_name/env_all/chromnitron_gpu
 
 export SINGULARITY_BINDPATH=/broad/boxialab/your_name:/broad/boxialab/your_name
-python main.py config.yaml
-
+python inference.py examples/local_config.yaml
